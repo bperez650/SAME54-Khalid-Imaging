@@ -1,5 +1,9 @@
 /*
- * GccApplication1.c
+ * Version for Khalid's Imaging system
+ * Version is very striped down and only has digital and analog outputs
+ *
+ * Using Termite Terminal
+ * USing SAME54P20A mcu on XPlained Pro developement board
  *
  * Created: 10/15/2018 11:49:12 AM
  * Author : bryant
@@ -7,29 +11,43 @@
 
 #include "sam.h"
 
-#define D00 PORT_PB26
-#define D01 PORT_PB27
-#define D02 PORT_PB28
-#define D03 PORT_PB29
+/* Digital IO for port control */
+#define D00		PORT_PA08
+#define D01		PORT_PA09
+#define D02		PORT_PA10
+#define D03		PORT_PA11
+#define D04		PORT_PB10
+#define D05		PORT_PB11
+#define D06		PORT_PB12
+#define D07		PORT_PB13
+#define D08		PORT_PB14
+#define D09		PORT_PB15
+#define D10		PORT_PD08
+#define D11		PORT_PD09
+#define D12		PORT_PD10
+#define D13		PORT_PD11
+#define D14		PORT_PD12
+#define D15		PORT_PC10
 
-#define SS0 PORT_PC07	
-//#define SS1 PORT_PB00
 
+#define SS0 PORT_PC06	
+#define SS1 PORT_PC07
 
-void clockSetup(void);
-void portSetup(void);
+/* Prototypes */
+void clock_setup(void);
+void port_setup(void);
 void wait(volatile int d);
-void sercom_0_Setup(void);	//USART
-void sercom_6_Setup(void);	//SPI
-void writeUart(char *a);
-void portControl(void);
-void dacSelect(void);
-void dacValue(void);
-void writeSPI(char *a);
-void tempADC_Setup(void);
-void tempTC_Setup(void);
+void terminal_UART_setup(void);	//USART
+void SPI_setup(void);	//SPI
+void write_terminal(char *a);
+void port_control(void);
+void DAC_select(void);
+void DAC_value(void);
+void write_SPI(char *a);
+void board_temp_ADC_setup(void);
 void convert(int a);
 
+/**********************************Terminal menu do not change or mess with *****************************************/
 volatile char menuArray[7][63] = {	//DO NOT FUCK WITH THIS 
 									{"\n\n_________________________________________________________  \n\n"},
 									{"                Artium Technologies, Inc Gen 3.0 Rev 0.0      \n"},
@@ -39,79 +57,102 @@ volatile char menuArray[7][63] = {	//DO NOT FUCK WITH THIS
 									{"KxxX K=Port K xx-Bit 0 to 15 X= State H or L                  \n"},
 									{"T=> Show Current Temperature Status\n\n#                        "},
 									};//DO NOT FUCK WITH THIS 
-volatile char *menuPtr;
-volatile int receiveCount = 0;	//receive array counter
-volatile char receiveArray[10] = {"0000000000"};
-volatile char receiveKey;
-volatile char *arrayPtr;
+/*********************************************************************************************************************/
+
+/* Global variables */
+volatile char *menu_ptr;
+volatile int receive_array_count = 0;	//receive array counter
+volatile char terminal_input_array[10] = {"0000000000"};
+volatile char receive_key;
+volatile char *terminal_input_array_ptr;
 volatile int state = 0;
-volatile char arrDAC[2];
-volatile char *arrDACptr;
-volatile int slaveSel;
-//volatile int ADC_result;
-volatile char convertArray[4];
-volatile char *convertArrayPtr;
+volatile char DAC_arrar[2];
+volatile char *DAC_array_ptr;
+volatile int slave_select;
+volatile char convert_array[4];
+volatile char *convert_array_ptr;
 	
 int main(void){
 
-    SystemInit();	//Initializme the SAM system
-	clockSetup();
-	portSetup();
-	sercom_0_Setup();	//USART
-	sercom_6_Setup();	//SPI
-	tempADC_Setup();
-	tempTC_Setup();
+	/* Initializing functions*/
+    SystemInit();
+	clock_setup();
+	port_setup();
+	terminal_UART_setup();	
+	SPI_setup();	
+	board_temp_ADC_setup();
 	
-	volatile char startArr[] = "\nStart\n";
+	/* Writes "start" to terminal upon reset */
+	volatile char startArr[] = "Start\n";
 	volatile char *startPtr;
 	startPtr = startArr;
-	writeUart(startPtr);
+	write_terminal(startPtr);
 
-	arrayPtr = receiveArray;
-	menuPtr = menuArray;
-	arrDACptr = arrDAC;
-	convertArrayPtr = convertArray;
+	/* Assign pointers */
+	terminal_input_array_ptr = terminal_input_array;
+	menu_ptr = menuArray;
+	DAC_array_ptr = DAC_arrar;
+	convert_array_ptr = convert_array;
 	
+	/* Polling loop looking for Terminal request */
 	while(1){	
 	
-		if(receiveKey == 13){	//look for carriage return
-		
-			if(((*arrayPtr == 'm') || (*arrayPtr == 'M')) && (receiveCount = 1)){	//verifying valid menu selection
-				writeUart(menuPtr);
-				receiveCount = 0;
-				receiveKey = 0;
+		if(receive_key == 13){	//look for carriage return
+			
+			/* Menu Selection */
+			if(((*terminal_input_array_ptr == 'm') || (*terminal_input_array_ptr == 'M')) && (receive_array_count = 1)){	
+				write_terminal(menu_ptr);
+				receive_array_count = 0;
+				receive_key = 0;
 			}
-			else if(((*arrayPtr == 't') || (*arrayPtr == 'T')) && (receiveCount = 1)){	//verifying valid Temperature selection
-				Tc *tc = TC4;
-				TcCount16 *tc4 = &tc->COUNT16;
-				tc4->CTRLBSET.bit.CMD = 1;	//force retrigger
-				while(tc4->SYNCBUSY.bit.CTRLB){}	//wait for sync to complete
-				receiveCount = 0;
-				receiveKey = 0;
+			
+			/*  BoardTemperature */
+			else if(((*terminal_input_array_ptr == 't') || (*terminal_input_array_ptr == 'T')) && (receive_array_count = 1)){	
+				
+				ADC1->SWTRIG.bit.START = 1;	//start conversion
+				while (ADC1->SYNCBUSY.bit.SWTRIG){}				 
+				while(ADC1->INTFLAG.bit.RESRDY == 0){}	//wait for conversion
+				volatile int ADC_result = ADC1->RESULT.reg;	//read ADC conversion result
+				volatile float result = (((float)ADC_result / 255) * 5);	//CHANGED float got changed from double
+				result = (result - 1.375)/ .0225;
+				int temp = (int)result;
+				int *temp1 = &temp;
+				convert(temp1);
+				receive_array_count = 0;
+				receive_key = 0;
 			}
-			else if(((*arrayPtr == 'k') || (*arrayPtr == 'K')) && (receiveCount = 4)){	//verifying valid input for digital
+			
+			/* Digital Out */
+			else if(((*terminal_input_array_ptr == 'k') || (*terminal_input_array_ptr == 'K')) && (receive_array_count = 4)){	
 				//writeUart(arrayPtr);
-				receiveCount = 0;
-				receiveKey = 0;
-				portControl();
+				receive_array_count = 0;
+				receive_key = 0;
+				port_control();
 			}
 		
-			else if(((*arrayPtr == 'd') || (*arrayPtr == 'D')) && (receiveCount = 5)){	//analog stuff
+			/* Analog Out */
+			else if(((*terminal_input_array_ptr == 'd') || (*terminal_input_array_ptr == 'D')) && (receive_array_count = 5)){	
 				//writeUart(arrayPtr);
-				receiveCount = 0;
-				receiveKey = 0;
-				dacSelect();
+				receive_array_count = 0;
+				receive_key = 0;
+				DAC_select();
 			}
 		
-			else{	//invalid key press, reset array 
-				receiveCount = 0;
-				receiveKey = 0;
+			/* Invalid Entry '?' */
+			else{	
+				volatile char Invalid_message_Arr[] = "?\n";
+				volatile char *Invalid_message_Ptr;
+				Invalid_message_Ptr = Invalid_message_Arr;
+				write_terminal(Invalid_message_Ptr);
+				receive_array_count = 0;
+				receive_key = 0;
 			}
 		}
 	}
 }
 
-void clockSetup(void){
+/* CLock source is 12MHz divided to 1MHz */
+void clock_setup(void){
 	//12MHz crystal on board selected mapped to PB22/PB23
 	OSCCTRL->XOSCCTRL[1].bit.ENALC = 1;	//enables auto loop ctrl to control amp of osc
 	OSCCTRL->XOSCCTRL[1].bit.IMULT = 4;
@@ -122,57 +163,60 @@ void clockSetup(void){
 	OSCCTRL->XOSCCTRL[1].bit.ENABLE = 1;
 	
 	GCLK->GENCTRL[0].reg = GCLK_GENCTRL_SRC_XOSC1 | GCLK_GENCTRL_RUNSTDBY | !(GCLK_GENCTRL_DIVSEL) | GCLK_GENCTRL_OE | GCLK_GENCTRL_GENEN | 12<<16;	//divide by 12 1MHz
-	while(GCLK->SYNCBUSY.bit.GENCTRL0){}	//wait for sync
+	while(GCLK->SYNCBUSY.bit.GENCTRL0){}	
 	
-	//channel 7, SERCOM0
 	GCLK->PCHCTRL[7].bit.CHEN = 0;	//disable for safety first
 	GCLK->PCHCTRL[7].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//SERCOM0
 	GCLK->PCHCTRL[36].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//SERCOM6
-	GCLK->PCHCTRL[30].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//TC4
 	GCLK->PCHCTRL[41].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//ADC1
 	
 	MCLK->CPUDIV.reg = 1;	//divide by 1
 	MCLK->APBAMASK.reg |= MCLK_APBAMASK_SERCOM0;	//unmask sercom0
 	MCLK->APBDMASK.reg |= MCLK_APBDMASK_SERCOM6;	//unmask sercom6
-	MCLK->APBCMASK.reg |= MCLK_APBCMASK_TC4;	//unmask TC4
 	MCLK->APBDMASK.reg |= MCLK_APBDMASK_ADC1;//unmask ADC1
 }
 
-void portSetup(void){
+void port_setup(void){
 	Port *por = PORT;
 	PortGroup *porA = &(por->Group[0]);
 	PortGroup *porB = &(por->Group[1]);
 	PortGroup *porC = &(por->Group[2]);
 	PortGroup *porD = &(por->Group[3]);
 	
-	///SERCOM0
-	porA->PMUX[2].bit.PMUXE = 3;	//PA04 pad0
-	porA->PINCFG[4].bit.PMUXEN = 1;	//PA05 pad1
+	/* SERCOM0 UART terminal */
+	porA->PMUX[2].bit.PMUXE = 3;	//PA04 pad0 Tx
+	porA->PINCFG[4].bit.PMUXEN = 1;	//PA05 pad1 Rx
 	porA->PMUX[2].bit.PMUXO = 3;
 	porA->PINCFG[5].bit.PMUXEN = 1;
 	
-	///SERCOM6
-	porC->PMUX[2].bit.PMUXE = 2;	//PC04 pad0
-	porC->PMUX[2].bit.PMUXO = 2;	//PC05 pad1
-	porC->PMUX[3].bit.PMUXE = 2;	//PC06 pad2
+	/* SERCOM6 SPI analog outputs*/
+	porC->PMUX[2].bit.PMUXE = 2;	//PC04 pad0 DO
+	porC->PMUX[2].bit.PMUXO = 2;	//PC05 pad1 SCLK
 	porC->PINCFG[4].bit.PMUXEN = 1;
 	porC->PINCFG[5].bit.PMUXEN = 1;
-	porC->PINCFG[6].bit.PMUXEN = 1;
+	
+	porC->DIRSET.reg |= PORT_PC06;	//SS0 for 1st DAC
 	porC->DIRSET.reg |= PORT_PC07;	//SS0 for 1st DAC
-	porC->DIRSET.reg |= PORT_PB00;	//SS1 for 2nd DAC
+	porC->OUTSET.reg |= PORT_PC06;	//initialize SS0 high
 	porC->OUTSET.reg |= PORT_PC07;	//initialize SS0 high
-	porC->OUTSET.reg |= PORT_PB00;	//initialize SS1 high
+
+	//porC->PMUX[3].bit.PMUXE = 2;	//PC06 pad2
+	//porC->PINCFG[6].bit.PMUXEN = 1;
 	
-	//PORTs
-	porB->DIRSET.reg = D00 | D01 | D02 | D03;	//PB26, PB27, PB28, PB29 //digital outputs
+	//porC->DIRSET.reg |= PORT_PB00;	//SS1 for 2nd DAC
+	//porC->OUTSET.reg |= PORT_PB00;	//initialize SS1 high
 	
-	//ADC
+	
+	/* PORTs digital outputs*/
+	porB->DIRSET.reg = D00 | D01 | D02 | D03;	//PB26, PB27, PB28, PB29 
+	
+	/* ADC */
 	porB->PMUX[2].bit.PMUXE = 1;	//PB04 ADC1 AIN[6]
 	porB->PINCFG[4].bit.PMUXEN = 1;
 	
 }
 
-void sercom_0_Setup(void){	//USART
+void terminal_UART_setup(void){
 	Sercom *ser = SERCOM0;
 	SercomUsart *uart = &(ser->USART);
 	uart->CTRLA.reg = 0;	//enable protected regs
@@ -196,24 +240,26 @@ void sercom_0_Setup(void){	//USART
 	while(uart->SYNCBUSY.reg){}
 }
 
-void SERCOM0_2_Handler(void){	//for recieving
+/* Handler for Terminal UART */
+void SERCOM0_2_Handler(void){	
 	Sercom *ser = SERCOM0;
 	SercomUsart *uart = &(ser->USART);
-	receiveKey = uart->DATA.reg;
-	if(receiveKey != 13){
-		receiveArray[receiveCount++] = receiveKey;
+	receive_key = uart->DATA.reg;
+	if(receive_key != 13){
+		terminal_input_array[receive_array_count++] = receive_key;
 	}
 
 }
 
-void sercom_6_Setup(void){	//SPI
+/* Setup for communicating with the DACs */
+void SPI_setup(void){	
 	Sercom *ser = SERCOM6;
 	SercomSpi *spi = &(ser->SPI);
 	spi->CTRLA.reg = 0<<1;	//disable first
 	while(spi->SYNCBUSY.reg){}	
 	spi->CTRLA.bit.DORD = 0;	//MSB first needed for AD5308
 	//spi->CTRLA.bit.DORD = 1;	//LSB first needed for AD5308
-	spi->CTRLA.bit.DOPO = 0;	//DO=pad0 PC04, SCK=pad1 PC05, SS=pad2 PC06
+	spi->CTRLA.bit.DOPO = 0;	//DO=pad0 PC04, SCK=pad1 PC05
 	spi->CTRLA.bit.FORM = 0;	//SPI frame form
 	spi->CTRLA.bit.MODE = 3;	//master mode
 	spi->CTRLB.bit.MSSEN = 0;	//software controlled SS
@@ -228,6 +274,7 @@ void sercom_6_Setup(void){	//SPI
 	
 }
 
+/* Handler for SPI */
 void SERCOM6_1_Handler(void){	//obsolete right now
 	//pull SS up again and end transaction
 	Sercom *ser = SERCOM6;
@@ -235,63 +282,25 @@ void SERCOM6_1_Handler(void){	//obsolete right now
 	spi->INTFLAG.bit.TXC = 1;
 }
 
-void tempADC_Setup(void){
-	ADC1->CTRLA.reg = 0<<1;	//disable so that we can reset
-	while (ADC1->SYNCBUSY.reg){}	//wait for disable to complete
+void board_temp_ADC_setup(void){
+	ADC1->CTRLA.reg = 0<<1;	
+	while (ADC1->SYNCBUSY.reg){}	
 	ADC1->CTRLA.bit.PRESCALER = 0;	//2^n
 	ADC1->CTRLA.bit.ONDEMAND = 1;
-	
 	ADC1->REFCTRL.reg = ADC_REFCTRL_REFSEL_INTVCC1;	//internal reference = VDDann
 	while(ADC1->SYNCBUSY.bit.REFCTRL){}
-	//ADC->CTRLB.reg = ADC_CTRLB_PRESCALER_DIV512 | ADC_CTRLB_RESSEL_8BIT | ADC_CTRLB_FREERUN | 0<<0 | ADC_CTRLB_CORREN;
 	ADC1->CTRLB.reg = ADC_CTRLB_RESSEL_8BIT | 0<<1 | 0<<0;	// freerun mode off, right adjust
-	while (ADC1->SYNCBUSY.bit.CTRLB){}	//wait for sync to complete
+	while (ADC1->SYNCBUSY.bit.CTRLB){}	
 	ADC1->INPUTCTRL.reg = ADC_INPUTCTRL_MUXNEG_GND | ADC_INPUTCTRL_MUXPOS_AIN6;	//AIN6=PB04
-	//ADC1->INPUTCTRL.bit.GAIN = 0xF;	//gain = 1/2
-	while (ADC1->SYNCBUSY.bit.INPUTCTRL){}	//wait for sync to complete
-	ADC1->SWTRIG.bit.START = 1;	//start conversion
-	while (ADC1->SYNCBUSY.bit.SWTRIG){}	//wait for sync to complete
-	ADC1->INTENSET.reg = ADC_INTENSET_RESRDY;	//setup interrupt when reg is ready to be read
+	while (ADC1->SYNCBUSY.bit.INPUTCTRL){}	
 	ADC1->CTRLA.reg |= 1<<1;	//enable ADC
-	while (ADC1->SYNCBUSY.reg){}	//wait for enable to complete
-	NVIC->ISER[3] |= 1<<25;	//enable the NVIC handler
-	//ADC0->OFFSETCORR.reg = 0b000000110100;	//shift down by 52, 2's comp
-	//ADC0->GAINCORR.reg =   0b100010100000;	//when corren is enabled it enables gain comp too, fractional
+	while (ADC1->SYNCBUSY.reg){}	
 }
 
-void ADC1_1_Handler(void){
-	volatile int ADC_result = ADC1->RESULT.reg;	//read ADC conversion result
-	volatile double result = (((double)ADC_result / 255) * 5);
-	result = (result - 1.375)/ .0225;
-	convert((int)result);
-}
-
-void tempTC_Setup(void){	//timer for reading the temp sensor
-	Tc *tc = TC4;
-	TcCount16 *tc4 = &tc->COUNT16;
-	tc4->CTRLA.reg = 0;	//disable the TC4
-	while(tc4->SYNCBUSY.reg){}	//wait for sync of disable
-	tc4->CTRLA.bit.PRESCALER = 4;	//2^n;
-	tc4->CTRLA.bit.MODE = 0;	//16 bit mode
-	tc4->CTRLBSET.bit.ONESHOT = 1;	//turn on one shot mode
-	while(tc4->SYNCBUSY.bit.CTRLB){}	//wait for sync to complete
-	tc4->INTENSET.bit.OVF = 1;	//enable the overflow interrupt
-	tc4->CTRLA.reg |= 1<<1;	//enable the TC4
-	while(tc4->SYNCBUSY.reg){}	//wait for sync of enable
-	NVIC->ISER[3] |= 1<<15;	//enable the NVIC handler for TC4
-}
-
-void TC4_Handler(void){
-	Tc *tc = TC4;
-	TcCount16 *tc4 = &tc->COUNT16;
-	tc4->INTFLAG.bit.OVF = 1;	//clear the int flag
-	ADC1->SWTRIG.reg = 1;//trigger ADC to start conversion
-}
-
-void writeUart(char *a){
+void write_terminal(char *a){
 	Sercom *ser = SERCOM0;
 	SercomUsart *uart = &(ser->USART);
-	if(receiveCount == 1){
+	if(receive_array_count == 1){
 		while(*a != '#'){
 			while(!(uart->INTFLAG.bit.DRE)){}
 			uart->DATA.reg = *a++;
@@ -309,76 +318,159 @@ void writeUart(char *a){
 	}
 }
 
-void portControl(void){
-	
+/* Selects digital port and gives it value */
+void port_control(void){
 		Port *por = PORT;
 		PortGroup *porB = &(por->Group[1]);
 		
-	if((*(arrayPtr+1) >= 48) && (*(arrayPtr+1) <= 57)){	//looking for number keys only
-		if((*(arrayPtr+2) >= 48) && (*(arrayPtr+2) <= 57)){	//looking for number keys only
-			volatile int zone = (*(arrayPtr+1) - 48) * 10;
-			zone += *(arrayPtr+2) - 48;
+	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
+		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
+			volatile int zone = (*(terminal_input_array_ptr+1) - 48) * 10;
+			zone += *(terminal_input_array_ptr+2) - 48;
 			
 			switch(zone){
 				case 0:
-				if(*(arrayPtr+3) == 'L' || *(arrayPtr+3) == 'l'){
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
 					porB->OUTCLR.reg = D00;
 				}
-				else if(*(arrayPtr+3) == 'H' || *(arrayPtr+3) == 'h'){
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
 					porB->OUTSET.reg = D00;
 				}
 				break;
 				
 				case 1:
-				if(*(arrayPtr+3) == 'L' || *(arrayPtr+3) == 'l'){
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
 					porB->OUTCLR.reg = D01;
 				}
-				else if(*(arrayPtr+3) == 'H' || *(arrayPtr+3) == 'h'){
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
 					porB->OUTSET.reg = D01;
 				}
 				break;
 				
 				case 2:
-				if(*(arrayPtr+3) == 'L' || *(arrayPtr+3) == 'l'){
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
 					porB->OUTCLR.reg = D02;
 				}
-				else if(*(arrayPtr+3) == 'H' || *(arrayPtr+3) == 'h'){
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
 					porB->OUTSET.reg = D02;
 				}
 				break;
 				
 				case 3:
-				if(*(arrayPtr+3) == 'L' || *(arrayPtr+3) == 'l'){
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
 					porB->OUTCLR.reg = D03;
 				}
-				else if(*(arrayPtr+3) == 'H' || *(arrayPtr+3) == 'h'){
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
 					porB->OUTSET.reg = D03;
 				}
 				break;
 				
 				case 4:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D04;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D04;
+				}
 				break;
+				
 				case 5:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D05;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D05;
+				}
 				break;
+				
 				case 6:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D06;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D06;
+				}
 				break;
+				
 				case 7:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D07;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D07;
+				}
 				break;
+				
 				case 8:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D08;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D08;
+				}
 				break;
+				
 				case 9:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D09;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D09;
+				}
 				break;
+				
 				case 10:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D10;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D10;
+				}
 				break;
+				
 				case 11:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D11;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D11;
+				}
 				break;
+				
 				case 12:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D12;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D12;
+				}
 				break;
+				
 				case 13:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D13;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D13;
+				}
 				break;
+				
 				case 14:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D14;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D14;
+				}
 				break;
+				
 				case 15:
+				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
+					porB->OUTCLR.reg = D15;
+				}
+				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
+					porB->OUTSET.reg = D15;
+				}
 				break;
 				
 				default:
@@ -388,44 +480,46 @@ void portControl(void){
 	}
 }
 
-void dacSelect(void){
+/* Selects which DAC out of 16 will be used */
+void DAC_select(void){
 	Port *por = PORT;
 	PortGroup *porB = &(por->Group[1]);
-		if((*(arrayPtr+1) >= 48) && (*(arrayPtr+1) <= 57)){	//looking for number keys only
-		if((*(arrayPtr+2) >= 48) && (*(arrayPtr+2) <= 57)){	//looking for number keys only
-			volatile int zone = (*(arrayPtr+1) - 48) * 10;
-			zone += *(arrayPtr+2) - 48;
+		if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
+		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
+			volatile int zone = (*(terminal_input_array_ptr+1) - 48) * 10;
+			zone += *(terminal_input_array_ptr+2) - 48;
 			if(zone <= 7){
-				arrDAC[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
-				slaveSel = 0;
+				DAC_arrar[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
+				slave_select = 0;
 			}
 			else{
-				arrDAC[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
-				slaveSel = 1;
+				DAC_arrar[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
+				slave_select = 1;
 			}
-			dacValue();
+			DAC_value();
 			
 		}
 	}
 }
 
-void dacValue(void){
-	if((*(arrayPtr+1) >= 48) && (*(arrayPtr+1) <= 57)){	//looking for number keys only
-		if((*(arrayPtr+2) >= 48) && (*(arrayPtr+2) <= 57)){	//looking for number keys only
-			if((*(arrayPtr+3) >= 48) && (*(arrayPtr+3) <= 57)){	//looking for number keys only
-				volatile int value = (*(arrayPtr+3) - 48) * 100;
-				value += (*(arrayPtr+4) - 48) * 10;
-				value += *(arrayPtr+5) - 48;
-				arrDAC[1] = value;
+/* Selects the value written to the DAC after it has been selected */
+void DAC_value(void){
+	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
+		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
+			if((*(terminal_input_array_ptr+3) >= 48) && (*(terminal_input_array_ptr+3) <= 57)){	//looking for number keys only
+				volatile int value = (*(terminal_input_array_ptr+3) - 48) * 100;
+				value += (*(terminal_input_array_ptr+4) - 48) * 10;
+				value += *(terminal_input_array_ptr+5) - 48;
+				DAC_arrar[1] = value;
 				//arrDACptr = arrDAC;
-				writeSPI(arrDACptr);
+				write_SPI(DAC_array_ptr);
 			}
 		}
 	}
 	
 }
 
-void writeSPI(char *a){
+void write_SPI(char *a){
 	int SS;	//which dac 
 	volatile static int j = 0;	//counter
 	Sercom *ser = SERCOM6;
@@ -436,7 +530,7 @@ void writeSPI(char *a){
 	
 	while( j<2 ){
 		
-		spi->DATA.reg = arrDAC[j];
+		spi->DATA.reg = DAC_arrar[j];
 		//spi->DATA.reg = 0xab;	//test
 		while(spi->INTFLAG.bit.DRE == 0){}	//wait for DATA reg to be empty
 		while(spi->INTFLAG.bit.TXC == 0){}	//wait for tx to finish
@@ -452,15 +546,15 @@ void writeSPI(char *a){
 	}
 	wait(1);
 	////// pulse SS (load) to clk data into dacs for TLV only
-	if(slaveSel == 0){	
+	if(slave_select == 0){	
 		porC->OUTCLR.reg = SS0;
 		//wait(1);
 		porC->OUTSET.reg = SS0;
 	}
-	else if(slaveSel == 1){
-		porB->OUTCLR.reg = SS0;
+	else if(slave_select == 1){
+		porB->OUTCLR.reg = SS1;
 		//wait(1);
-		porB->OUTSET.reg = SS0;
+		porB->OUTSET.reg = SS1;
 	}
 	j = 0;
 }
@@ -472,6 +566,7 @@ void wait(volatile int d){
 	}
 }
 
+/* Converts a decimal value into and array of char for serial comm */
 void convert(int a){
 	int i = 100;   //divisor
 	int j = 0;  //array counter
@@ -484,37 +579,37 @@ void convert(int a){
 			int p = (m-1);
 			switch(p) {
 				case 0:
-				convertArray[j++] = '0';
+				convert_array[j++] = '0';
 				break;
 				case 1:
-				convertArray[j++] = '1';
+				convert_array[j++] = '1';
 				break;
 				case 2:
-				convertArray[j++] = '2';
+				convert_array[j++] = '2';
 				break;
 				case 3:
-				convertArray[j++] = '3';
+				convert_array[j++] = '3';
 				break;
 				case 4:
-				convertArray[j++] = '4';
+				convert_array[j++] = '4';
 				break;
 				case 5:
-				convertArray[j++] = '5';
+				convert_array[j++] = '5';
 				break;
 				case 6:
-				convertArray[j++] = '6';
+				convert_array[j++] = '6';
 				break;
 				case 7:
-				convertArray[j++] = '7';
+				convert_array[j++] = '7';
 				break;
 				case 8:
-				convertArray[j++] = '8';
+				convert_array[j++] = '8';
 				break;
 				case 9:
-				convertArray[j++] = '9';
+				convert_array[j++] = '9';
 				break;
 				default:
-				convertArray[j++] = 'A';
+				convert_array[j++] = 'A';
 				break;
 			}
 			a = a - (n*(m-1));
@@ -535,6 +630,6 @@ void convert(int a){
 			i = i + n;
 		}
 	}
-	convertArray[3] = 0;	//force pointer to end here
-	writeUart(convertArrayPtr);
+	convert_array[3] = 0;	//force pointer to end here
+	write_terminal(convert_array_ptr);
 }
