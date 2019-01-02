@@ -190,27 +190,21 @@ void port_setup(void){
 	porA->PINCFG[5].bit.PMUXEN = 1;
 	
 	/* SERCOM6 SPI analog outputs*/
-	porC->PMUX[2].bit.PMUXE = 2;	//PC04 pad0 DO
+	porC->PMUX[2].bit.PMUXE = 2;	//PC04 pad0 Data out
 	porC->PMUX[2].bit.PMUXO = 2;	//PC05 pad1 SCLK
 	porC->PINCFG[4].bit.PMUXEN = 1;
 	porC->PINCFG[5].bit.PMUXEN = 1;
 	
 	porC->DIRSET.reg |= PORT_PC06;	//SS0 for 1st DAC
-	porC->DIRSET.reg |= PORT_PC07;	//SS0 for 1st DAC
+	porC->DIRSET.reg |= PORT_PC07;	//SS1 for 2nd DAC
 	porC->OUTSET.reg |= PORT_PC06;	//initialize SS0 high
 	porC->OUTSET.reg |= PORT_PC07;	//initialize SS0 high
-
-	//porC->PMUX[3].bit.PMUXE = 2;	//PC06 pad2
-	//porC->PINCFG[6].bit.PMUXEN = 1;
-	
-	//porC->DIRSET.reg |= PORT_PB00;	//SS1 for 2nd DAC
-	//porC->OUTSET.reg |= PORT_PB00;	//initialize SS1 high
-	
 	
 	/* PORTs digital outputs*/
-	porB->DIRSET.reg = D00 | D01 | D02 | D03;	//PB26, PB27, PB28, PB29 
+	porB->DIRSET.reg = D00 | D01 | D02 | D03 | D04 | D06 | D07 |
+	D08 | D09 | D10 | D11 | D12 | D13 | D14 | D15;	
 	
-	/* ADC */
+	/* ADC for board temperature */
 	porB->PMUX[2].bit.PMUXE = 1;	//PB04 ADC1 AIN[6]
 	porB->PINCFG[4].bit.PMUXEN = 1;
 	
@@ -312,13 +306,13 @@ void write_terminal(char *a){
 		while(*a){
 			while(!(uart->INTFLAG.bit.DRE)){}
 			uart->DATA.reg = *a++;
-			while((uart->INTFLAG.bit.TXC)==0){}	// waiting for transmit to complete
+			while((uart->INTFLAG.bit.TXC)==0){}	
 		}
 		uart->DATA.reg = 10;
 	}
 }
 
-/* Selects digital port and gives it value */
+/* Selects digital port and assigns output */
 void port_control(void){
 		Port *por = PORT;
 		PortGroup *porB = &(por->Group[1]);
