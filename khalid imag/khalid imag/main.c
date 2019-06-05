@@ -10,6 +10,7 @@
  */ 
 
 #include "sam.h"
+# include "heaters.h"
 
 /* Digital IO for port control */
 #define D00		PORT_PA08
@@ -43,19 +44,23 @@ void write_terminal(char *a);
 void port_control(void);
 void DAC_select(void);
 void DAC_value(void);
-void write_SPI(char *a);
+void write_SPI(void);
 void board_temp_ADC_setup(void);
 void convert(int a);
 
 /**********************************Terminal menu do not change or mess with *****************************************/
-volatile char menuArray[7][63] = {	//DO NOT FUCK WITH THIS 
+volatile char menuArray[11][63] = {	//DO NOT FUCK WITH THIS 
 									{"\n\n_________________________________________________________  \n\n"},
 									{"                Artium Technologies, Inc Gen 3.0 Rev 0.0      \n"},
 									{"_________________________________________________________    \n\n"},
 									{"M=> Show Menu                                                 \n"},
 									{"DxxXXX D=Analog Out x=Cannel Number 0 to 15 XXX=000 to 255    \n"},
 									{"KxxX K=Port K xx-Bit 0 to 15 X= State H or L                  \n"},
-									{"T=> Show Current Temperature Status\n\n#                        "},
+									{"TxxX T=Temperature x=Zone 0 to 7 XXX=000 to 102 in C          \n"},
+									{"           Temp Output is 51 to 255 Temp Range -100C to 100C  \n"},
+									{"           153=0C Add 1 per degree C                          \n"},
+                                    {"T=> Show Current Board Temperature Status                     \n"},
+									{"C=> Show Current RTD Temperature Status\n\n#                    "},
 									};//DO NOT FUCK WITH THIS 
 /*********************************************************************************************************************/
 
@@ -71,6 +76,8 @@ volatile char *DAC_array_ptr;
 volatile int slave_select;
 volatile char convert_array[4];
 volatile char *convert_array_ptr;
+volatile int DAC_data = 0;
+
 	
 int main(void){
 
@@ -81,6 +88,10 @@ int main(void){
 	terminal_UART_setup();	
 	SPI_setup();	
 	board_temp_ADC_setup();
+	rtd_port_setup();
+	ADC_0_Setup();
+	ADC_1_Setup();
+	rtd_TC_Setup();
 	
 	/* Writes "start" to terminal upon reset */
 	volatile char startArr[] = "Start\n";
@@ -92,7 +103,9 @@ int main(void){
 	terminal_input_array_ptr = terminal_input_array;
 	menu_ptr = menuArray;
 	DAC_array_ptr = DAC_arrar;
+	RTD_array_ptr = RTD_array;
 	convert_array_ptr = convert_array;
+	
 	
 	/* Polling loop looking for Terminal request */
 	while(1){	
@@ -137,6 +150,14 @@ int main(void){
 				receive_key = 0;
 				DAC_select();
 			}
+			
+			/* RTD temperatures */
+			else if(((*terminal_input_array_ptr == 'c') || (*terminal_input_array_ptr == 'C')) && (receive_array_count = 5)){	
+				//writeUart(arrayPtr);
+				receive_array_count = 0;
+				receive_key = 0;
+				display_RTDs();
+			}
 		
 			/* Invalid Entry '?' */
 			else{	
@@ -169,11 +190,15 @@ void clock_setup(void){
 	GCLK->PCHCTRL[7].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//SERCOM0
 	GCLK->PCHCTRL[36].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//SERCOM6
 	GCLK->PCHCTRL[41].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//ADC1
+	GCLK->PCHCTRL[40].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//ADC0
+	GCLK->PCHCTRL[30].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;	//TC4
 	
 	MCLK->CPUDIV.reg = 1;	//divide by 1
 	MCLK->APBAMASK.reg |= MCLK_APBAMASK_SERCOM0;	//unmask sercom0
 	MCLK->APBDMASK.reg |= MCLK_APBDMASK_SERCOM6;	//unmask sercom6
 	MCLK->APBDMASK.reg |= MCLK_APBDMASK_ADC1;//unmask ADC1
+	MCLK->APBDMASK.reg |= MCLK_APBDMASK_ADC0;//unmask ADC0
+	MCLK->APBCMASK.reg |= MCLK_APBCMASK_TC4;//unmask TC4
 }
 
 void port_setup(void){
@@ -251,11 +276,16 @@ void SPI_setup(void){
 	SercomSpi *spi = &(ser->SPI);
 	spi->CTRLA.reg = 0<<1;	//disable first
 	while(spi->SYNCBUSY.reg){}	
+	
+	///needed for DAC///
 	spi->CTRLA.bit.DORD = 0;	//MSB first needed for AD5308
 	//spi->CTRLA.bit.DORD = 1;	//LSB first needed for AD5308
+	spi->CTRLA.bit.CPHA = 0;	//needed for DAC
+	spi->CTRLA.bit.CPOL = 1;	//needed for DAC
+	
 	spi->CTRLA.bit.DOPO = 0;	//DO=pad0 PC04, SCK=pad1 PC05
 	spi->CTRLA.bit.FORM = 0;	//SPI frame form
-	spi->CTRLA.bit.MODE = 3;	//master mode
+	spi->CTRLA.bit.MODE = 3;	//master mode	
 	spi->CTRLB.bit.MSSEN = 0;	//software controlled SS
 	spi->CTRLB.bit.CHSIZE = 0;	//8 bit char size
 	while(spi->SYNCBUSY.reg){}
@@ -483,11 +513,13 @@ void DAC_select(void){
 			volatile int zone = (*(terminal_input_array_ptr+1) - 48) * 10;
 			zone += *(terminal_input_array_ptr+2) - 48;
 			if(zone <= 7){
-				DAC_arrar[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
+				//DAC_arrar[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
+				DAC_data = zone << 8;
 				slave_select = 0;
 			}
 			else{
-				DAC_arrar[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
+				//DAC_arrar[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
+				DAC_data = (zone - 8) << 8;
 				slave_select = 1;
 			}
 			DAC_value();
@@ -498,23 +530,25 @@ void DAC_select(void){
 
 /* Selects the value written to the DAC after it has been selected */
 void DAC_value(void){
-	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
-		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
-			if((*(terminal_input_array_ptr+3) >= 48) && (*(terminal_input_array_ptr+3) <= 57)){	//looking for number keys only
+	if((*(terminal_input_array_ptr+3) >= 48) && (*(terminal_input_array_ptr+3) <= 57)){	//looking for number keys only
+		if((*(terminal_input_array_ptr+4) >= 48) && (*(terminal_input_array_ptr+4) <= 57)){	//looking for number keys only
+			if((*(terminal_input_array_ptr+5) >= 48) && (*(terminal_input_array_ptr+5) <= 57)){	//looking for number keys only
 				volatile int value = (*(terminal_input_array_ptr+3) - 48) * 100;
 				value += (*(terminal_input_array_ptr+4) - 48) * 10;
 				value += *(terminal_input_array_ptr+5) - 48;
-				DAC_arrar[1] = value;
+				DAC_data = value | DAC_data;
+				DAC_data = DAC_data << 4;
 				//arrDACptr = arrDAC;
-				write_SPI(DAC_array_ptr);
+				write_SPI();
 			}
 		}
 	}
 	
 }
 
-void write_SPI(char *a){
-	int SS;	//which dac 
+void write_SPI(void){
+	int SS;	//which dac
+	int DAC_write_array[2];	// char array to transmit
 	volatile static int j = 0;	//counter
 	Sercom *ser = SERCOM6;
 	SercomSpi *spi = &(ser->SPI);
@@ -522,34 +556,45 @@ void write_SPI(char *a){
 	PortGroup *porB = &(por->Group[1]);
 	PortGroup *porC = &(por->Group[2]);
 	
+	DAC_write_array[0] = DAC_data >> 8; 
+    DAC_write_array[1] = DAC_data & 0b0000000011111111;
+	
+	// pull the SS downwhich is the SYNC pin on ad5308 chip
+	if(slave_select == 0){
+		porC->OUTCLR.reg = SS0;
+	}
+	else if(slave_select == 1){
+		porB->OUTCLR.reg = SS1;
+	}
+	
 	while( j<2 ){
 		
-		spi->DATA.reg = DAC_arrar[j];
+		spi->DATA.reg = DAC_write_array[j];
 		//spi->DATA.reg = 0xab;	//test
 		while(spi->INTFLAG.bit.DRE == 0){}	//wait for DATA reg to be empty
 		while(spi->INTFLAG.bit.TXC == 0){}	//wait for tx to finish
 		j++;	//increment counter
-		//if(j == 2){
-			//spi->INTENCLR.bit.DRE = 1;	//clear the DRE flag
-			//Port *por = PORT;
-			//PortGroup *porA = &(por->Group[0]);
-			//porA->OUTCLR.reg = SS;	//pull SS down
-			//wait(1);
-			//porA->OUTSET.reg = SS;	//pull SS up
-		//}
+		
 	}
-	wait(1);
-	////// pulse SS (load) to clk data into dacs for TLV only
-	if(slave_select == 0){	
-		porC->OUTCLR.reg = SS0;
-		//wait(1);
+	
+	if(slave_select == 0){
 		porC->OUTSET.reg = SS0;
 	}
 	else if(slave_select == 1){
-		porB->OUTCLR.reg = SS1;
-		//wait(1);
 		porB->OUTSET.reg = SS1;
 	}
+	//wait(1);
+	//////// pulse SS (load) to clk data into dacs for TLV only
+	//if(slave_select == 0){	
+		//porC->OUTCLR.reg = SS0;
+		////wait(1);
+		//porC->OUTSET.reg = SS0;
+	//}
+	//else if(slave_select == 1){
+		//porB->OUTCLR.reg = SS1;
+		////wait(1);
+		//porB->OUTSET.reg = SS1;
+	//}
 	j = 0;
 }
 
