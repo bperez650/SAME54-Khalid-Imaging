@@ -54,12 +54,12 @@ volatile char menuArray[11][63] = {	//DO NOT FUCK WITH THIS
 									{"                Artium Technologies, Inc Gen 3.0 Rev 0.0      \n"},
 									{"_________________________________________________________    \n\n"},
 									{"M=> Show Menu                                                 \n"},
-									{"DxxXXX D=Analog Out x=Cannel Number 0 to 15 XXX=000 to 255    \n"},
-									{"KxxX K=Port K xx-Bit 0 to 15 X= State H or L                  \n"},
-									{"TxxX T=Temperature x=Zone 0 to 7 XXX=000 to 102 in C          \n"},
+									{"DxXXX D=Analog Out x=Cannel Number 0 to F XXX=000 to 255      \n"},
+									{"KxX K=Port K x-Bit 0 to F X= State H or L                     \n"},
+									{"TxXXX T=Temperature x=Zone 0 to 7 XXX=000 to 102 in C         \n"},
 									{"           Temp Output is 51 to 255 Temp Range -100C to 100C  \n"},
 									{"           153=0C Add 1 per degree C                          \n"},
-                                    {"T=> Show Current Board Temperature Status                     \n"},
+                                    {"B=> Show Current Board Temperature Status                     \n"},
 									{"C=> Show Current RTD Temperature Status\n\n#                    "},
 									};//DO NOT FUCK WITH THIS 
 /*********************************************************************************************************************/
@@ -88,7 +88,7 @@ int main(void){
 	terminal_UART_setup();	
 	SPI_setup();	
 	board_temp_ADC_setup();
-	rtd_port_setup();
+	heater_port_setup();
 	ADC_0_Setup();
 	ADC_1_Setup();
 	rtd_TC_Setup();
@@ -113,14 +113,14 @@ int main(void){
 		if(receive_key == 13){	//look for carriage return
 			
 			/* Menu Selection */
-			if(((*terminal_input_array_ptr == 'm') || (*terminal_input_array_ptr == 'M')) && (receive_array_count = 1)){	
+			if(((*terminal_input_array_ptr == 'm') || (*terminal_input_array_ptr == 'M')) && (receive_array_count == 1)){	
 				write_terminal(menu_ptr);
 				receive_array_count = 0;
 				receive_key = 0;
 			}
 			
 			/*  BoardTemperature */
-			else if(((*terminal_input_array_ptr == 't') || (*terminal_input_array_ptr == 'T')) && (receive_array_count = 1)){	
+			else if(((*terminal_input_array_ptr == 'b') || (*terminal_input_array_ptr == 'B')) && (receive_array_count == 1)){	
 				
 				ADC1->SWTRIG.bit.START = 1;	//start conversion
 				while (ADC1->SYNCBUSY.bit.SWTRIG){}				 
@@ -136,27 +136,31 @@ int main(void){
 			}
 			
 			/* Digital Out */
-			else if(((*terminal_input_array_ptr == 'k') || (*terminal_input_array_ptr == 'K')) && (receive_array_count = 4)){	
-				//writeUart(arrayPtr);
+			else if(((*terminal_input_array_ptr == 'k') || (*terminal_input_array_ptr == 'K')) && (receive_array_count == 3)){	
 				receive_array_count = 0;
 				receive_key = 0;
 				port_control();
 			}
 		
 			/* Analog Out */
-			else if(((*terminal_input_array_ptr == 'd') || (*terminal_input_array_ptr == 'D')) && (receive_array_count = 5)){	
-				//writeUart(arrayPtr);
+			else if(((*terminal_input_array_ptr == 'd') || (*terminal_input_array_ptr == 'D')) && (receive_array_count == 5)){	
 				receive_array_count = 0;
 				receive_key = 0;
 				DAC_select();
 			}
 			
-			/* RTD temperatures */
-			else if(((*terminal_input_array_ptr == 'c') || (*terminal_input_array_ptr == 'C')) && (receive_array_count = 5)){	
-				//writeUart(arrayPtr);
+			/* RTD temperatures status */
+			else if(((*terminal_input_array_ptr == 'c') || (*terminal_input_array_ptr == 'C')) && (receive_array_count == 1)){	
 				receive_array_count = 0;
 				receive_key = 0;
 				display_RTDs();
+			}
+			
+			/* Heater setpoint */
+			else if(((*terminal_input_array_ptr == 't') || (*terminal_input_array_ptr == 'T')) && (receive_array_count == 5)){
+				receive_array_count = 0;
+				receive_key = 0;
+				heater_setpoint();
 			}
 		
 			/* Invalid Entry '?' */
@@ -344,188 +348,192 @@ void write_terminal(char *a){
 
 /* Selects digital port and assigns output */
 void port_control(void){
-		Port *por = PORT;
-		PortGroup *porB = &(por->Group[1]);
+	Port *por = PORT;
+	PortGroup *porB = &(por->Group[1]);
+	volatile int port_zone;
 		
 	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
-		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
-			volatile int zone = (*(terminal_input_array_ptr+1) - 48) * 10;
-			zone += *(terminal_input_array_ptr+2) - 48;
+		port_zone = *(terminal_input_array_ptr+1) - 48;}
+	else if((*(terminal_input_array_ptr+1) >= 65) && (*(terminal_input_array_ptr+1) <= 70)){	//looking for hex upper case alpha keys only
+		port_zone = *(terminal_input_array_ptr+1) - 55;}
+	else if((*(terminal_input_array_ptr+1) >= 97) && (*(terminal_input_array_ptr+1) <= 102)){	//looking for hex lower case alpha keys only
+		port_zone = *(terminal_input_array_ptr+1) - 87;}
 			
-			switch(zone){
-				case 0:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D00;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D00;
-				}
-				break;
-				
-				case 1:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D01;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D01;
-				}
-				break;
-				
-				case 2:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D02;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D02;
-				}
-				break;
-				
-				case 3:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D03;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D03;
-				}
-				break;
-				
-				case 4:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D04;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D04;
-				}
-				break;
-				
-				case 5:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D05;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D05;
-				}
-				break;
-				
-				case 6:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D06;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D06;
-				}
-				break;
-				
-				case 7:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D07;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D07;
-				}
-				break;
-				
-				case 8:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D08;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D08;
-				}
-				break;
-				
-				case 9:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D09;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D09;
-				}
-				break;
-				
-				case 10:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D10;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D10;
-				}
-				break;
-				
-				case 11:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D11;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D11;
-				}
-				break;
-				
-				case 12:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D12;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D12;
-				}
-				break;
-				
-				case 13:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D13;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D13;
-				}
-				break;
-				
-				case 14:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D14;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D14;
-				}
-				break;
-				
-				case 15:
-				if(*(terminal_input_array_ptr+3) == 'L' || *(terminal_input_array_ptr+3) == 'l'){
-					porB->OUTCLR.reg = D15;
-				}
-				else if(*(terminal_input_array_ptr+3) == 'H' || *(terminal_input_array_ptr+3) == 'h'){
-					porB->OUTSET.reg = D15;
-				}
-				break;
-				
-				default:
-				break;
-			}
+	switch(port_zone){
+		case 0:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D00;
 		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D00;
+		}
+		break;
+				
+		case 1:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D01;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D01;
+		}
+		break;
+				
+		case 2:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D02;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D02;
+		}
+		break;
+				
+		case 3:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D03;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D03;
+		}
+		break;
+				
+		case 4:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D04;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D04;
+		}
+		break;
+				
+		case 5:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D05;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D05;
+		}
+		break;
+				
+		case 6:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D06;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D06;
+		}
+		break;
+				
+		case 7:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D07;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D07;
+		}
+		break;
+				
+		case 8:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D08;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D08;
+		}
+		break;
+				
+		case 9:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D09;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D09;
+		}
+		break;
+				
+		case 10:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D10;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D10;
+		}
+		break;
+				
+		case 11:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D11;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D11;
+		}
+		break;
+				
+		case 12:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D12;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D12;
+		}
+		break;
+				
+		case 13:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D13;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D13;
+		}
+		break;
+				
+		case 14:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D14;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D14;
+		}
+		break;
+				
+		case 15:
+		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
+			porB->OUTCLR.reg = D15;
+		}
+		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
+			porB->OUTSET.reg = D15;
+		}
+		break;
+				
+		default:
+		break;
 	}
+
 }
 
 /* Selects which DAC out of 16 will be used */
 void DAC_select(void){
 	Port *por = PORT;
 	PortGroup *porB = &(por->Group[1]);
-		if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
-		if((*(terminal_input_array_ptr+2) >= 48) && (*(terminal_input_array_ptr+2) <= 57)){	//looking for number keys only
-			volatile int zone = (*(terminal_input_array_ptr+1) - 48) * 10;
-			zone += *(terminal_input_array_ptr+2) - 48;
-			if(zone <= 7){
-				//DAC_arrar[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
-				DAC_data = zone << 8;
-				slave_select = 0;
-			}
-			else{
-				//DAC_arrar[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
-				DAC_data = (zone - 8) << 8;
-				slave_select = 1;
-			}
-			DAC_value();
-			
-		}
+	
+	volatile int DAC_zone;	
+	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
+		DAC_zone = *(terminal_input_array_ptr+1) - 48;}
+	else if((*(terminal_input_array_ptr+1) >= 65) && (*(terminal_input_array_ptr+1) <= 70)){	//looking for hex upper case alpha keys only
+		DAC_zone = *(terminal_input_array_ptr+1) - 55;}
+	else if((*(terminal_input_array_ptr+1) >= 97) && (*(terminal_input_array_ptr+1) <= 102)){	//looking for hex lower case alpha keys only
+		DAC_zone = *(terminal_input_array_ptr+1) - 87;}
+	if(DAC_zone <= 7){
+		//DAC_arrar[0] = 2 * zone;	// 2 * zone is to accomodate TLV only
+		DAC_data = DAC_zone << 8;
+		slave_select = 0;
 	}
+	else{
+		//DAC_arrar[0]= 2 * (zone - 8);	// 2 * zone is to accomodate TLV only
+		DAC_data = (DAC_zone - 8) << 8;
+		slave_select = 1;
+	}
+	DAC_value();
+			
 }
 
 /* Selects the value written to the DAC after it has been selected */
