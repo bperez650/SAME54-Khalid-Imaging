@@ -1,7 +1,7 @@
 #ifndef HEATERS_H_INCLUDED
 #define HEATERS_H_INCLUDED
 
-/* Global variable declarations */
+/* Global variable declarations 1*/
 extern int RTD_array[8];
 extern int *RTD_array_ptr;
 extern int setpoint_array[8];
