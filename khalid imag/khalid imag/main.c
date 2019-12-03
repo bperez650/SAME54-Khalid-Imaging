@@ -91,6 +91,7 @@ int main(void){
 	heater_port_setup();
 	ADC_0_Setup();
 	ADC_1_Setup();
+
 	rtd_TC_Setup();
 	
 	/* Writes "start" to terminal upon reset */
@@ -179,15 +180,15 @@ int main(void){
 /* CLock source is 12MHz divided to 1MHz */
 void clock_setup(void){
 	//12MHz crystal on board selected mapped to PB22/PB23
-	OSCCTRL->XOSCCTRL[1].bit.ENALC = 1;	//enables auto loop ctrl to control amp of osc
-	OSCCTRL->XOSCCTRL[1].bit.IMULT = 4;
-	OSCCTRL->XOSCCTRL[1].bit.IPTAT = 3;
-	OSCCTRL->XOSCCTRL[1].bit.ONDEMAND = 1;
-	OSCCTRL->XOSCCTRL[1].bit.RUNSTDBY = 1;
-	OSCCTRL->XOSCCTRL[1].bit.XTALEN = 1;	//select ext crystal osc mode
-	OSCCTRL->XOSCCTRL[1].bit.ENABLE = 1;
+	OSCCTRL->XOSCCTRL[0].bit.ENALC = 1;	//enables auto loop ctrl to control amp of osc
+	OSCCTRL->XOSCCTRL[0].bit.IMULT = 4;
+	OSCCTRL->XOSCCTRL[0].bit.IPTAT = 3;
+	OSCCTRL->XOSCCTRL[0].bit.ONDEMAND = 1;
+	OSCCTRL->XOSCCTRL[0].bit.RUNSTDBY = 1;
+	OSCCTRL->XOSCCTRL[0].bit.XTALEN = 1;	//select ext crystal osc mode
+	OSCCTRL->XOSCCTRL[0].bit.ENABLE = 1;
 	
-	GCLK->GENCTRL[0].reg = GCLK_GENCTRL_SRC_XOSC1 | GCLK_GENCTRL_RUNSTDBY | !(GCLK_GENCTRL_DIVSEL) | GCLK_GENCTRL_OE | GCLK_GENCTRL_GENEN | 12<<16;	//divide by 12 1MHz
+	GCLK->GENCTRL[0].reg = GCLK_GENCTRL_SRC_XOSC0 | GCLK_GENCTRL_RUNSTDBY | !(GCLK_GENCTRL_DIVSEL) | GCLK_GENCTRL_OE | GCLK_GENCTRL_GENEN | 12<<16;	//divide by 12 1MHz
 	while(GCLK->SYNCBUSY.bit.GENCTRL0){}	
 	
 	GCLK->PCHCTRL[7].bit.CHEN = 0;	//disable for safety first
@@ -230,12 +231,15 @@ void port_setup(void){
 	porC->OUTSET.reg |= PORT_PC07;	//initialize SS0 high
 	
 	/* PORTs digital outputs*/
-	porB->DIRSET.reg = D00 | D01 | D02 | D03 | D04 | D06 | D07 |
-	D08 | D09 | D10 | D11 | D12 | D13 | D14 | D15;	
-	
+	porA->DIRSET.reg = D00 | D01 | D02 | D03;
+	porB->DIRSET.reg = D04 | D05 | D06 | D07 | D08 | D09;	
+	porC->DIRSET.reg = D15;
+	porD->DIRSET.reg = D10 | D11 | D12 | D13 | D14;
 	/* ADC for board temperature */
 	porB->PMUX[2].bit.PMUXE = 1;	//PB04 ADC1 AIN[6]
 	porB->PINCFG[4].bit.PMUXEN = 1;
+	
+
 	
 }
 
@@ -349,7 +353,10 @@ void write_terminal(char *a){
 /* Selects digital port and assigns output */
 void port_control(void){
 	Port *por = PORT;
+	PortGroup *porA = &(por->Group[0]);
 	PortGroup *porB = &(por->Group[1]);
+	PortGroup *porC = &(por->Group[2]);
+	PortGroup *porD = &(por->Group[3]);
 	volatile int port_zone;
 		
 	if((*(terminal_input_array_ptr+1) >= 48) && (*(terminal_input_array_ptr+1) <= 57)){	//looking for number keys only
@@ -362,37 +369,37 @@ void port_control(void){
 	switch(port_zone){
 		case 0:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D00;
+			porA->OUTCLR.reg = D00;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D00;
+			porA->OUTSET.reg = D00;
 		}
 		break;
 				
 		case 1:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D01;
+			porA->OUTCLR.reg = D01;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D01;
+			porA->OUTSET.reg = D01;
 		}
 		break;
 				
 		case 2:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D02;
+			porA->OUTCLR.reg = D02;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D02;
+			porA->OUTSET.reg = D02;
 		}
 		break;
 				
 		case 3:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D03;
+			porA->OUTCLR.reg = D03;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D03;
+			porA->OUTSET.reg = D03;
 		}
 		break;
 				
@@ -452,55 +459,55 @@ void port_control(void){
 				
 		case 10:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D10;
+			porD->OUTCLR.reg = D10;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D10;
+			porD->OUTSET.reg = D10;
 		}
 		break;
 				
 		case 11:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D11;
+			porD->OUTCLR.reg = D11;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D11;
+			porD->OUTSET.reg = D11;
 		}
 		break;
 				
 		case 12:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D12;
+			porD->OUTCLR.reg = D12;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D12;
+			porD->OUTSET.reg = D12;
 		}
 		break;
 				
 		case 13:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D13;
+			porD->OUTCLR.reg = D13;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D13;
+			porD->OUTSET.reg = D13;
 		}
 		break;
 				
 		case 14:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D14;
+			porD->OUTCLR.reg = D14;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D14;
+			porD->OUTSET.reg = D14;
 		}
 		break;
 				
 		case 15:
 		if(*(terminal_input_array_ptr+2) == 'L' || *(terminal_input_array_ptr+2) == 'l'){
-			porB->OUTCLR.reg = D15;
+			porC->OUTCLR.reg = D15;
 		}
 		else if(*(terminal_input_array_ptr+2) == 'H' || *(terminal_input_array_ptr+2) == 'h'){
-			porB->OUTSET.reg = D15;
+			porC->OUTSET.reg = D15;
 		}
 		break;
 				
